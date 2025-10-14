@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<title>Keyboard Drop (Minimal + Letters)</title>
+<style>
+  html,body{margin:0;height:100%}
+  body{display:flex;align-items:center;justify-content:center;background:#fff;color:#000;font:14px system-ui,sans-serif}
+  canvas{border:1px solid #000}
+</style>
+</head>
+<body>
+<canvas id="cv" width="900" height="600"></canvas>
+
+<script>
+(function(){
+  const cv = document.getElementById('cv');
+  const ctx = cv.getContext('2d');
+
+  // ---- 최소 설정 ----
+  const KW=50, KH=40, GX=6, GY=8;
+  const ROWS = ["qwertyuiop","asdfghjkl","zxcvbnm"];
+  const ROW_OFF = [0, 0.5, 1.25];
+  const SPACE_COLS = 5;
+  const PAD=16;
+  const FIELD_TOP_MARGIN=12;
+
+  const BLOCK = 40;
+  const GRAV=700;
+  const VMAX=650;
+  const RESET_TIME=1.2;
+
+  // ---- 키보드 배치 ----
+  const keys=[];
+  let kbLeft, kbTop, kbW, kbH;
+  (function buildKeyboard(){
+    const longest = Math.max(...ROWS.map(r=>r.length));
+    const rowsCnt = ROWS.length + 1; // space row 포함
+    const rowsH = rowsCnt*KH + (rowsCnt-1)*GY;
+    kbW = longest*KW + (longest-1)*GX + PAD*2;
+    kbH = rowsH + PAD*2;
+    kbLeft = (cv.width - kbW)/2;
+    kbTop  = PAD;
+
+    let y = kbTop + PAD;
+    ROWS.forEach((row,r)=>{
+      const rowLeft = kbLeft + PAD + (ROW_OFF[r]||0)*(KW+GX);
+      let x=rowLeft;
+      for(const ch of row){
+        keys.push({ch, x, y, w:KW, h:KH});
+        x += KW+GX;
+      }
+      y += KH+GY;
+    });
+    // space row
+    const visW = KW*SPACE_COLS + GX*(SPACE_COLS-1);
+    const x = kbLeft + (kbW-2*PAD - visW)/2 + PAD;
+    keys.push({ch:" ", x, y, w:visW, h:KH});
+  })();
+
+  const fieldTop = kbTop + kbH + FIELD_TOP_MARGIN;
+  const fieldBottom = cv.height - PAD;
+
+  // ---- 상태 ----
+  const falling=[]; // {x,y,w,h,vy,ch}
+  const settled=[]; // {x,y,w,h,ch}
+  let resetTimer=0;
+
+  // ---- 유틸 ----
+  function spawn(ch){
+    const key = keys.find(k=>k.ch===ch);
+    if(!key) return;
+    const isSpace = (ch===" ");
+    const w = isSpace ? BLOCK*SPACE_COLS : BLOCK;
+    const h = BLOCK;
+    const x = key.x + key.w/2 - w/2;
+    const y = key.y + (KH-h)/2; // 키 중앙에서 시작
+    falling.push({x,y,w,h,vy:0,ch:isSpace?"space":""+ch.toUpperCase()});
+  }
+  function overlap(ax,ay,aw,ah,bx,by,bw,bh){
+    return ax<bx+bw && ax+aw>bx && ay<by+bh && ay+ah>by;
+  }
+
+  function update(dt){
+    const floorEnabled = (resetTimer<=0);
+    if(resetTimer>0) resetTimer -= dt;
+
+    for(let i=falling.length-1;i>=0;i--){
+      const b=falling[i];
+      b.vy = Math.min(b.vy + GRAV*dt, VMAX);
+      let ny = b.y + b.vy*dt;
+
+      if(ny > cv.height + 80){ falling.splice(i,1); continue; }
+
+      if(floorEnabled){
+        const floorY = fieldBottom - b.h;
+        if(ny >= floorY){
+          ny=floorY;
+          settled.push({x:b.x,y:ny,w:b.w,h:b.h,ch:b.ch});
+          falling.splice(i,1);
+          continue;
+        }
+      }
+
+      if(floorEnabled && settled.length){
+        let hit=false, snapY=ny;
+        for(const s of settled){
+          const ox = !(b.x+b.w<=s.x || b.x>=s.x+s.w);
+          if(!ox) continue;
+          if(overlap(b.x,ny,b.w,b.h,s.x,s.y,s.w,s.h)){
+            hit=true; snapY = s.y - b.h; break;
+          }
+        }
+        if(hit){
+          settled.push({x:b.x,y:snapY,w:b.w,h:b.h,ch:b.ch});
+          falling.splice(i,1);
+          continue;
+        }
+      }
+      b.y = ny;
+    }
+  }
+
+  function reset(){
+    if(resetTimer>0) return;
+    for(const s of settled){
+      falling.push({x:s.x,y:s.y,w:s.w,h:s.h,vy:0,ch:s.ch});
+    }
+    settled.length=0;
+    resetTimer = RESET_TIME;
+  }
+
+  // ---- 그리기 ----
+  function drawBlockRectWithChar(x,y,w,h,ch){
+    // 사각형
+    ctx.fillStyle="#000";
+    ctx.fillRect(x,y,w,h);
+    // 글자
+    ctx.fillStyle="#fff";
+    ctx.font="16px sans-serif";
+    ctx.textAlign="center";
+    ctx.textBaseline="middle";
+    ctx.fillText(ch===" " ? "␣" : ch, x + w/2, y + h/2);
+  }
+
+  function draw(){
+    ctx.clearRect(0,0,cv.width,cv.height);
+
+    // 키보드
+    ctx.strokeStyle="#000"; ctx.fillStyle="#000";
+    ctx.strokeRect(kbLeft, kbTop, kbW, kbH);
+    for(const k of keys){
+      ctx.strokeRect(k.x, k.y, k.w, k.h);
+      ctx.font="12px sans-serif";
+      ctx.textAlign="center"; ctx.textBaseline="middle";
+      const label = (k.ch===" ") ? "SPACE" : k.ch.toUpperCase();
+      ctx.fillText(label, k.x+k.w/2, k.y+k.h/2);
+    }
+
+    // 필드
+    ctx.strokeRect(PAD, fieldTop, cv.width-2*PAD, fieldBottom-fieldTop);
+
+    // 정착 + 낙하 블록 (글자 포함)
+    for(const s of settled) drawBlockRectWithChar(s.x,s.y,s.w,s.h,s.ch);
+    for(const f of falling) drawBlockRectWithChar(f.x,f.y,f.w,f.h,f.ch);
+  }
+
+  // ---- 루프 ----
+  let last=performance.now();
+  function tick(now){
+    const dt=Math.min(0.033,(now-last)/1000); last=now;
+    update(dt);
+    draw();
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+
+  // ---- 입력 ----
+  window.addEventListener('keydown', e=>{
+    if(e.key==='Enter'){ e.preventDefault(); reset(); return; }
+    if(e.key===' '){ e.preventDefault(); spawn(' '); return; }
+    const k=e.key.toLowerCase();
+    if(k.length===1 && k>='a' && k<='z') spawn(k);
+  });
+})();
+</script>
+</body>
+</html>
