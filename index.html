@@ -17,7 +17,7 @@
   const cv = document.getElementById('cv');
   const ctx = cv.getContext('2d');
 
-  // ---- 최소 설정 ----
+  // 기본 설정
   const KW=50, KH=40, GX=6, GY=8;
   const ROWS = ["qwertyuiop","asdfghjkl","zxcvbnm"];
   const ROW_OFF = [0, 0.5, 1.25];
@@ -30,7 +30,7 @@
   const VMAX=650;
   const RESET_TIME=1.2;
 
-  // ---- 키보드 배치 ----
+  // 키보드 배치
   const keys=[];
   let kbLeft, kbTop, kbW, kbH;
   (function buildKeyboard(){
@@ -61,12 +61,12 @@
   const fieldTop = kbTop + kbH + FIELD_TOP_MARGIN;
   const fieldBottom = cv.height - PAD;
 
-  // ---- 상태 ----
+  // 상태
   const falling=[]; // {x,y,w,h,vy,ch}
   const settled=[]; // {x,y,w,h,ch}
   let resetTimer=0;
 
-  // ---- 유틸 ----
+  // 유틸
   function spawn(ch){
     const key = keys.find(k=>k.ch===ch);
     if(!key) return;
@@ -130,7 +130,7 @@
     resetTimer = RESET_TIME;
   }
 
-  // ---- 그리기 ----
+  // 그리기
   function drawBlockRectWithChar(x,y,w,h,ch){
     // 사각형
     ctx.fillStyle="#000";
@@ -165,7 +165,7 @@
     for(const f of falling) drawBlockRectWithChar(f.x,f.y,f.w,f.h,f.ch);
   }
 
-  // ---- 루프 ----
+  // 루프
   let last=performance.now();
   function tick(now){
     const dt=Math.min(0.033,(now-last)/1000); last=now;
@@ -175,7 +175,7 @@
   }
   requestAnimationFrame(tick);
 
-  // ---- 입력 ----
+  // 입력
   window.addEventListener('keydown', e=>{
     if(e.key==='Enter'){ e.preventDefault(); reset(); return; }
     if(e.key===' '){ e.preventDefault(); spawn(' '); return; }
