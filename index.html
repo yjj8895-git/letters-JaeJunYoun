@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>Letters · Typing System – Center Spawn & Clean Keyboard</title>
+  <title>Letters · Typing System – Left Shift + Digit Toggle</title>
   <style>
     :root { --bg:#0b0b0b; --fg:#eaeaea; --muted:#9aa0a6; }
     html, body { height:100%; }
@@ -18,12 +18,11 @@
     #hud { left:10px; top:10px; padding:8px 10px; max-width:48vw; }
     #hud h1 { margin:0 0 4px; font-size:12px; color:#bdbdbd; }
     #hud p  { margin:0; font-size:11px; color:#cfcfcf; }
-
     #sentencePanel { right:10px; top:10px; padding:8px 10px; min-width:200px; max-width:38vw; }
     #sentencePanel h2 { margin:0 0 6px; font-size:12px; color:#cfcfcf; }
     #stackText {
       display:block; font-size:18px; letter-spacing:.5px; line-height:1.3; color:#fff;
-      min-height:22px; white-space: pre;  /* 연속 공백 유지 */
+      min-height:22px; white-space: pre; /* 연속 공백 유지 */
     }
   </style>
   <script src="https://unpkg.com/matter-js@0.20.0/build/matter.min.js"></script>
@@ -104,22 +103,19 @@
     }
     computeKBGeom();
 
-    // 허용되는 키만 표시/스폰
+    // 허용 키만 스폰/표시
     const ALPHA = new Set('abcdefghijklmnopqrstuvwxyz'.split(''));
     const DIGIT = new Set('0123456789'.split(''));
     const isSpawnKey = (k) => ALPHA.has(k) || DIGIT.has(k);
-
     function normalizeKey(k){ if(k===' ') return ' '; return (k.length===1 ? k.toLowerCase() : k); }
+
     function keyToPosition(k){
-      // 키보드 레이아웃 좌표(시각적 키캡 중심과 일치) — 허용 키만 처리
       const key = normalizeKey(k);
       if (key === ' '){
         const row = 3, y = KB.y + row*(KB.keyH+KB.gap) + KB.keyH + Math.round(14 * SCALE), x = KB.x + KB.w/2;
         return { x, y };
       }
-      // 알파벳/숫자만 배치
       if (!isSpawnKey(key)) return { x: VIEW_W*0.5, y: 50*SCALE };
-
       for (let row=0; row<KB_ROWS.length; row++){
         const idx = KB_ROWS[row].indexOf(key);
         if (idx !== -1){
@@ -132,17 +128,16 @@
       return { x: VIEW_W*0.5, y: 50 * SCALE };
     }
 
-    // Shift/Backspace 스폰 위치
-    function shiftSpawnPos(side){
-      if (side === 'right'){
-        const slash = keyToPosition('/'); // 시각용 기준(숨겨져도 좌표 계산만)
-        const w = KB.keyW[3] || 40;
-        return { x: (slash.x || (KB.x+KB.w/2)) + w*0.9, y: (slash.y || (KB.y + 3*(KB.keyH+KB.gap) + KB.keyH/2)) };
-      } else {
-        const zPos = keyToPosition('z');
-        const w = KB.keyW[3] || 40;
-        return { x: (zPos.x || (KB.x+KB.w/2)) - w*0.9, y: (zPos.y || (KB.y + 3*(KB.keyH+KB.gap) + KB.keyH/2)) };
-      }
+    // ======== Shift/Backspace 스폰 좌표 ========
+    // 왼쪽 Shift만 사용 (오른쪽 Shift 제거)
+    function shiftSpawnPos(){
+      const row = 3;
+      const w = KB.keyW[row], h = KB.keyH, gap = KB.gap;
+      const rowOffset = KB.offsets[row]*(w+gap);
+      const zCol = KB_ROWS[3].indexOf('z');
+      const y = KB.y + row*(h+gap) + h/2 + Math.round(6*SCALE);
+      const x = KB.x + rowOffset + (zCol)*(w+gap) - w*0.9; // Z 왼쪽(왼쪽 Shift 자리)
+      return { x, y };
     }
     function backspaceSpawnPos(){
       const w=KB.keyW[0], rowOffset=KB.offsets[0]*(w+KB.gap), top=KB_ROWS[0];
@@ -172,7 +167,6 @@
 
       const tipY = Math.min(VIEW_H*0.46, VIEW_H - Math.round(220*SCALE));
       const tipClear = Math.max(8, Math.round(9*SCALE));
-
       const halfHole = HOLE_D/2;
 
       const uL = { x: Math.cos(V_ANGLE),  y: Math.sin(V_ANGLE)  };
@@ -250,9 +244,9 @@
       Composite.add(engine.world, ball);
     }
 
-    // Shift ball
-    function spawnShiftBall(side='left'){
-      const p = shiftSpawnPos(side);
+    // Left Shift ball only
+    function spawnShiftBall(){
+      const p = shiftSpawnPos();
       const ball = Bodies.circle(p.x, p.y, BASE_R, {
         restitution:0.04, friction:0.035, frictionAir:0.0045, density:0.0017,
         render:{ fillStyle:'#3a6df0', strokeStyle:'#1f3180', lineWidth:2 }
@@ -269,13 +263,21 @@
     Composite.add(engine.world, mc);
     render.mouse = mouse;
 
-    // ======== SHIFT 변환 ========
-    const digitShiftMap = { '1':'!', '2':'@', '3':'#', '4':'$', '5':'%', '6':'^', '7':'&', '8':'*', '9':'(', '0':')' };
+    // ======== SHIFT 변환: 숫자↔기호 토글 + 알파벳 토글 ========
+    const digitToSymbol = { '1':'!', '2':'@', '3':'#', '4':'$', '5':'%', '6':'^', '7':'&', '8':'*', '9':'(', '0':')' };
+    const symbolToDigit = { '!':'1', '@':'2', '#':'3', '$':'4', '%':'5', '^':'6', '&':'7', '*':'8', '(':'9', ')':'0' };
+
     function applyShiftToLabel(lbl){
       if (lbl === '␣') return '␣';
+
+      // 알파벳: 대↔소문자 토글
       if (/^[a-z]$/.test(lbl)) return lbl.toUpperCase();
       if (/^[A-Z]$/.test(lbl)) return lbl.toLowerCase();
-      if (digitShiftMap[lbl]) return digitShiftMap[lbl];
+
+      // 숫자/기호: 양방향 토글
+      if (digitToSymbol[lbl]) return digitToSymbol[lbl];  // 1 -> !
+      if (symbolToDigit[lbl]) return symbolToDigit[lbl];  // ! -> 1
+
       return lbl;
     }
 
@@ -289,7 +291,7 @@
         if (b.__isBackspace && a.__isToken && !b.__spent){
           b.__spent = true; removeToken(a); Composite.remove(engine.world, b); return;
         }
-        // Shift 변환
+        // Shift 변환 (토글)
         if (a.__isShift && b.__isToken){
           b.__label = applyShiftToLabel(b.__label);
           Composite.remove(engine.world, a);
@@ -312,7 +314,6 @@
     function updateSentence(){
       const { xL, xR, yTop, yBot } = channelMetrics;
       const padX = 2, padY = 2;
-
       const inside = tokens.filter(b => b.__isToken && (
         b.position.x >= xL - padX && b.position.x <= xR + padX &&
         b.position.y >= yTop - padY && b.position.y <= yBot + padY
@@ -325,7 +326,6 @@
       const chain = [];
       const TOUCH_EPS = 1.8;
       const ALIGN_EPS = BASE_R * 0.6;
-
       let prev = inside[0];
       chain.push(prev);
       for (let i = 1; i < inside.length; i++){
@@ -357,7 +357,7 @@
     });
     Events.on(engine, 'afterUpdate', updateSentence);
 
-    // ======== 키보드 드로잉(불필요 키 숨김 + 중앙 정렬) ========
+    // ======== 키보드(오버레이: 오른쪽 Shift 제거) ========
     const pressedAt = new Map();
     const PRESS_FLASH_MS = 150;
 
@@ -376,13 +376,16 @@
       ctx.strokeStyle = 'rgba(255,255,255,0.35)';
       ctx.fillStyle = isBright ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.10)';
       roundRect(ctx, x, y, w, h, r);
-      ctx.fill();
-      ctx.stroke();
+      ctx.fill(); ctx.stroke();
       ctx.fillStyle = '#e6e6e6';
       ctx.font = `${Math.floor(h*0.42)}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`;
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       ctx.fillText(label, x + w/2, y + h/2 + 0.5);
     }
+    const ALLOWED_FOR_OVERLAY = new Set([
+      ...'abcdefghijklmnopqrstuvwxyz'.split(''), ...'0123456789'.split(''),
+      // 특수키는 아래에서 별도로 그림(Backspace, Left Shift)
+    ]);
 
     function drawKeyboard(ctx){
       // 알파벳/숫자만 그림
@@ -391,9 +394,8 @@
         const w = KB.keyW[row], h = KB.keyH, gap = KB.gap;
         const rowOffset = KB.offsets[row]*(w+gap);
         for (let i=0; i<rowStr.length; i++){
-          const k = rowStr[i];
-          const kl = k.toLowerCase();
-          if (!(isSpawnKey(kl))) continue; // 불허 키 숨김
+          const k = rowStr[i]; const kl = k.toLowerCase();
+          if (!(ALLOWED_FOR_OVERLAY.has(kl))) continue;
           const x = KB.x + rowOffset + i*(w+gap);
           const y = KB.y + row*(h+gap);
           const keyId = kl;
@@ -413,8 +415,7 @@
         const y  = KB.y + row*(h+gap) + h + Math.round(6*SCALE);
         const keyId = ' ';
         const t = pressedAt.get(keyId) || 0;
-        const isBright = (performance.now() - t) < PRESS_FLASH_MS;
-        drawKey(ctx, cx, y, spaceW, h*0.9, 'SPACE', isBright);
+        drawKey(ctx, cx, y, spaceW, h*0.9, 'SPACE', (performance.now()-t)<PRESS_FLASH_MS);
       }
       // Backspace
       {
@@ -428,32 +429,22 @@
         const t = pressedAt.get('Backspace') || 0;
         drawKey(ctx, x, y, bw, h, 'BACKSPACE', (performance.now()-t)<PRESS_FLASH_MS);
       }
-      // Shift (좌/우)
+      // Left Shift (오른쪽 Shift는 그리지 않음)
       {
         const w = KB.keyW[3], h = KB.keyH, gap = KB.gap;
         const row = 3;
         const rowOffset = KB.offsets[row]*(w+gap);
-
-        // Left Shift
         const zCol = KB_ROWS[3].indexOf('z');
         const leftW = w*1.6 + gap*0.6;
         const leftX = KB.x + rowOffset + (zCol)*(w+gap) - (leftW + gap);
         const leftY = KB.y + row*(h+gap);
         drawKey(ctx, leftX, leftY, leftW, h, 'SHIFT', (performance.now()-(pressedAt.get('ShiftLeft')||0))<PRESS_FLASH_MS);
-
-        // Right Shift
-        const slashCol = KB_ROWS[3].indexOf('/');
-        const rightX = KB.x + rowOffset + (slashCol+1)*(w+gap);
-        const rightW = w*1.9 + gap*0.9;
-        drawKey(ctx, rightX, leftY, rightW, h, 'SHIFT', (performance.now()-(pressedAt.get('ShiftRight')||0))<PRESS_FLASH_MS);
       }
     }
 
-    // ======== 렌더(키보드 + 라벨) ========
     Events.on(render, 'afterRender', () => {
       const ctx = render.context;
       drawKeyboard(ctx);
-
       // 토큰 라벨
       ctx.save();
       ctx.textAlign='center'; ctx.textBaseline='middle';
@@ -473,7 +464,7 @@
       ctx.restore();
     });
 
-    // ======== 입력 ========
+    // ======== INPUT ========
     let lastTime = performance.now();
     document.addEventListener('keydown', (e) => {
       // 하이라이트 기록
@@ -481,18 +472,18 @@
       else {
         pressedAt.set(e.code || e.key, performance.now());
         if (e.key === 'Backspace') pressedAt.set('Backspace', performance.now());
+        if (e.code === 'ShiftLeft' || e.key === 'Shift') pressedAt.set('ShiftLeft', performance.now());
       }
 
-      // Shift → ⇧ 공 스폰
-      if (e.key === 'Shift' || e.code === 'ShiftLeft'){ spawnShiftBall('left'); return; }
-      if (e.code === 'ShiftRight'){ spawnShiftBall('right'); return; }
+      // 오른쪽 Shift는 무시, 왼쪽/일반 Shift만 처리
+      if (e.code === 'ShiftLeft' || e.key === 'Shift') { spawnShiftBall(); return; }
 
       // 제어키
       if (e.key === 'Backspace' || e.code === 'Backspace'){ e.preventDefault(); spawnBackspaceBall(); return; }
       if (e.key === 'Enter' || e.code === 'Enter'){ resetAll(); return; }
       if (e.key === ' ' || e.code === 'Space'){ const p=keyToPosition(' '); spawnToken(' ',{x:p.x,y:p.y}); return; }
 
-      // 알파벳/숫자만 스폰
+      // 알파벳/숫자
       let ch = null;
       if (/^[a-zA-Z]$/.test(e.key)) {
         ch = e.key.toLowerCase();
@@ -507,7 +498,6 @@
       }
       if (!ch) return;
 
-      // 중앙 스폰: spread 제거(=0)
       const p = keyToPosition(ch);
       spawnToken(ch, { x: p.x, y: p.y });
       lastTime = performance.now();
@@ -516,7 +506,6 @@
     // ======== RESIZE/RESET ========
     function rebuildAll(){
       SCALE = calcScale();
-
       render.options.width = VIEW_W; render.options.height = VIEW_H;
       render.canvas.width = VIEW_W * DPR; render.canvas.height = VIEW_H * DPR;
       render.canvas.style.width = VIEW_W + 'px'; render.canvas.style.height = VIEW_H + 'px';
@@ -530,7 +519,6 @@
 
       KB.y = Math.round(64 * SCALE);
       computeKBGeom();
-
       makeFunnel();
       updateSentence();
     }
