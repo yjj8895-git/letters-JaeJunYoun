@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>Letters · Typing System – Tighter Scale & Smoother Channel</title>
+  <title>Letters · Typing System – Shift Ball</title>
   <style>
     :root { --bg:#0b0b0b; --fg:#eaeaea; --muted:#9aa0a6; }
     html, body { height:100%; }
@@ -17,7 +17,6 @@
     #hud { left:10px; top:10px; padding:8px 10px; max-width:48vw; }
     #hud h1 { margin:0 0 4px; font-size:12px; color:#bdbdbd; }
     #hud p  { margin:0; font-size:11px; color:#cfcfcf; }
-    #hud kbd{ background:#222; border:1px solid #333; border-bottom-color:#2a2a2a; padding:0 6px; border-radius:6px; font:11px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
 
     #sentencePanel { right:10px; top:10px; padding:8px 10px; min-width:200px; max-width:38vw; }
     #sentencePanel h2 { margin:0 0 6px; font-size:12px; color:#cfcfcf; }
@@ -30,7 +29,6 @@
       min-height:22px;
       white-space: pre; /* 연속 공백 유지 */
     }
-    #hint { margin:4px 0 0; font-size:11px; color:#9aa0a6; opacity:.9; }
   </style>
   <script src="https://unpkg.com/matter-js@0.20.0/build/matter.min.js"></script>
 </head>
@@ -51,27 +49,23 @@
     const { Engine, Render, Runner, Bodies, Body, Composite, Events, Mouse, MouseConstraint } = Matter;
     const deg = d => d * Math.PI / 180;
 
-    // ======== SCALE: 화면에 맞춰 자동 축소/확대 ========
+    // ======== SCALE ========
     let VIEW_W = window.innerWidth;
     let VIEW_H = window.innerHeight;
-
     function calcScale() {
       VIEW_W = window.innerWidth;
       VIEW_H = window.innerHeight;
       const baseW = 1280, baseH = 800;
-      // 더 작게: 0.92 → 0.82, 최소 0.5
-      const S = Math.max(0.5, Math.min(1.0, Math.min(VIEW_W / baseW, VIEW_H / baseH) * 0.82));
-      return S;
+      return Math.max(0.5, Math.min(1.0, Math.min(VIEW_W / baseW, VIEW_H / baseH) * 0.82));
     }
     let SCALE = calcScale();
 
-    // ======== 엔진/렌더 ========
+    // ======== ENGINE/RENDER ========
     const DPR = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
     const stage = document.getElementById('stage');
     const engine = Engine.create();
-    engine.gravity.y = 1.7;            // 살짝 ↑
+    engine.gravity.y = 1.7;
     engine.enableSleeping = false;
-    // 관통/안정성
     engine.positionIterations = 12;
     engine.velocityIterations = 10;
     engine.constraintIterations = 4;
@@ -83,23 +77,23 @@
     Render.run(render);
     const runner = Runner.create(); Runner.run(runner, engine);
 
-    // ======== 치수(모두 SCALE 반영) ========
-    const BASE_R   = Math.max(9, Math.round(20 * SCALE)); // 더 작게
+    // ======== DIMENSIONS ========
+    const BASE_R   = Math.max(9, Math.round(20 * SCALE));
     const BASE_D   = BASE_R * 2;
     const KB_Y     = Math.round(64 * SCALE);
     const KB_KEYH  = Math.max(26, Math.round(32 * SCALE));
     const KB_GAP   = Math.max(4,  Math.round(7  * SCALE));
-    const V_ANGLE  = deg(30);                       // 초입 가속 ↑
+    const V_ANGLE  = deg(30);
     const RAMP_LEN = Math.min(820 * SCALE, VIEW_W * 0.72);
     const RAMP_H   = Math.max(12, Math.round(16 * SCALE));
     const THROAT_T = Math.max(7,  Math.round(9  * SCALE));
     const HOLE_D   = BASE_D + Math.round(4 * SCALE);
-    const THROAT_GAP = HOLE_D + 2;                  // ⬅ 공 지름 + 2px (매끄럽게)
+    const THROAT_GAP = HOLE_D + 2;
     const THROAT_LEN = Math.max(64, Math.round(76 * SCALE));
     const CHAN_LEN = Math.max(300 * SCALE, Math.min(VIEW_H * 0.46, 500 * SCALE));
-    const BOTTOM_H = Math.max(40, Math.round(48 * SCALE));   // 두껍게 유지
+    const BOTTOM_H = Math.max(40, Math.round(48 * SCALE));
 
-    // ======== 키보드 레이아웃 ========
+    // ======== KEYBOARD LAYOUT ========
     const KB_ROWS = ["`1234567890-=", "qwertyuiop[]\\", "asdfghjkl;'", "zxcvbnm,./"];
     const KB = { x:0, y:KB_Y, w:0, keyH:KB_KEYH, gap:KB_GAP, offsets:[0,0.5,0.9,1.4], keyW:[] };
 
@@ -133,12 +127,22 @@
       return { x: VIEW_W*0.5, y: 50 * SCALE };
     }
 
-    // ======== 깔대기(V) → 목 → 1열 통로 → 바닥 ========
+    // 좌/우 Shift 공 스폰 위치
+    function shiftSpawnPos(side){
+      if (side === 'right'){
+        const slash = keyToPosition('/'); // 오른쪽 시프트 근처
+        return { x: slash.x + (KB.keyW[3] || 40)*0.9, y: slash.y };
+      } else {
+        const zPos = keyToPosition('z');  // 왼쪽 시프트 근처
+        return { x: zPos.x - (KB.keyW[3] || 40)*0.9, y: zPos.y };
+      }
+    }
+
+    // ======== FUNNEL / CHANNEL / FLOOR ========
     let walls = {};
     const channelMetrics = { xL:0, xR:0, yTop:0, yBot:0 };
 
     function makeFunnel(){
-      // 레일/램프: 마찰 0, 반발 0, 모서리 라운드(챔퍼) → 매끈
       const wallMat = {
         isStatic:true,
         friction:0, frictionStatic:0, restitution:0,
@@ -147,7 +151,6 @@
       };
       const thickness = Math.round(64 * SCALE);
 
-      // 경계
       walls.left   = Bodies.rectangle(-thickness/2, VIEW_H/2, thickness, VIEW_H*2, wallMat);
       walls.right  = Bodies.rectangle(VIEW_W+thickness/2, VIEW_H/2, thickness, VIEW_H*2, wallMat);
       walls.ceiling= Bodies.rectangle(VIEW_W/2, -thickness/2, VIEW_W, thickness, wallMat);
@@ -159,7 +162,6 @@
 
       const halfHole = HOLE_D/2;
 
-      // V 램프
       const uL = { x: Math.cos(V_ANGLE),  y: Math.sin(V_ANGLE)  };
       const uR = { x: Math.cos(-V_ANGLE), y: Math.sin(-V_ANGLE) };
 
@@ -171,8 +173,7 @@
       walls.rampL = Bodies.rectangle(C_left.x,  C_left.y,  RAMP_LEN, RAMP_H, { ...wallMat, angle:  V_ANGLE });
       walls.rampR = Bodies.rectangle(C_right.x, C_right.y, RAMP_LEN, RAMP_H, { ...wallMat, angle: -V_ANGLE });
 
-      // 목(throat)
-      const throatGap = THROAT_GAP;         // 공 지름 + 2px
+      const throatGap = THROAT_GAP;
       const throatLen = THROAT_LEN;
       const throatMidY = tipY + throatLen/2 + Math.round(6*SCALE);
       const throatX_L = cx - throatGap/2 - THROAT_T/2;
@@ -181,7 +182,6 @@
       walls.throatL = Bodies.rectangle(throatX_L, throatMidY, THROAT_T, throatLen, wallMat);
       walls.throatR = Bodies.rectangle(throatX_R, throatMidY, THROAT_T, throatLen, wallMat);
 
-      // 메인 채널 (간격 = 목 - 2px → 여전히 1열, 끼임 완화)
       const channelGap = throatGap - 2;
       const channelLen = CHAN_LEN;
       const chanX_L = cx - channelGap/2 - THROAT_T/2;
@@ -191,7 +191,6 @@
       walls.railL = Bodies.rectangle(chanX_L, chanMidY, THROAT_T, channelLen, wallMat);
       walls.railR = Bodies.rectangle(chanX_R, chanMidY, THROAT_T, channelLen, wallMat);
 
-      // 바닥 (두껍게)
       walls.bottom = Bodies.rectangle(VIEW_W/2, chanMidY + channelLen/2 + BOTTOM_H/2, VIEW_W, BOTTOM_H, wallMat);
 
       Composite.add(engine.world, [
@@ -201,7 +200,6 @@
         walls.railL, walls.railR, walls.bottom
       ]);
 
-      // 문장 계산용 경계(채널 내부)
       channelMetrics.xL   = cx - channelGap/2;
       channelMetrics.xR   = cx + channelGap/2;
       channelMetrics.yTop = chanMidY - channelLen/2;
@@ -209,7 +207,7 @@
     }
     makeFunnel();
 
-    // ======== 토큰(공) ========
+    // ======== TOKENS ========
     const tokens = [];
     function hashColor(char){ const code=(char||' ').charCodeAt(0); const h=(code*37)%360; return `hsl(${h} 68% 54%)`; }
 
@@ -217,20 +215,21 @@
       const x = (opts.x ?? VIEW_W*0.5);
       const y = (opts.y ?? 50*SCALE);
       const circle = Bodies.circle(x, y, BASE_R, {
-        restitution:0.04,       // 아주 적게 튐
-        friction:0.035,         // 레일에서 미끄럽게
-        frictionAir:0.0045,     // 공기저항 소폭 ↓
+        restitution:0.04,
+        friction:0.035,
+        frictionAir:0.0045,
         density:0.00155,
         render:{ fillStyle:hashColor(char), strokeStyle:'#333', lineWidth:1 }
       });
-      circle.__label = (char === ' ') ? '␣' : (char.length===1 ? char : char.slice(0,2));
+      // 저장: 스페이스는 특수 기호, 그 외엔 현재 표시문자 그대로 저장
+      circle.__label = (char === ' ') ? '␣' : String(char);
       circle.__isToken = true;
       tokens.push(circle);
       Composite.add(engine.world, circle);
     }
     function removeToken(b){ if(!b) return; Composite.remove(engine.world, b); const i=tokens.indexOf(b); if(i>=0) tokens.splice(i,1); }
 
-    // 백스페이스(⌫)
+    // Backspace ball (글자류 삭제 전용)
     function backspaceSpawnPos(){
       const w=KB.keyW[0], rowOffset=KB.offsets[0]*(w+KB.gap), top=KB_ROWS[0];
       const x = KB.x + rowOffset + (top.length)*(w+KB.gap) + w*0.6;
@@ -251,7 +250,23 @@
       Composite.add(engine.world, ball);
     }
 
-    // 마우스 드래그(테스트용)
+    // Shift ball (⇧) — 충돌 시 대상 글자/숫자를 Shift 변환하고 본인은 소멸
+    function spawnShiftBall(side='left'){
+      const p = shiftSpawnPos(side);
+      const ball = Bodies.circle(p.x, p.y, BASE_R, {
+        restitution:0.04,
+        friction:0.035,
+        frictionAir:0.0045,
+        density:0.0017,
+        render:{ fillStyle:'#3a6df0', strokeStyle:'#1f3180', lineWidth:2 }
+      });
+      ball.__label = '⇧';
+      ball.__isShift = true;   // __isToken이 아님 → ⌫에 의해 제거되지 않음
+      tokens.push(ball);       // 물리/체인 위치 판단을 위해 tokens에는 포함
+      Composite.add(engine.world, ball);
+    }
+
+    // 마우스 드래그
     const mouse = Mouse.create(render.canvas);
     const mc = MouseConstraint.create(engine, { mouse, constraint:{ stiffness:0.12, angularStiffness:0.06, render:{ visible:false } } });
     Composite.add(engine.world, mc);
@@ -261,7 +276,7 @@
     Events.on(render, 'afterRender', () => {
       const ctx = render.context;
 
-      // 미니 키보드 가이드
+      // 미니 키보드
       ctx.save();
       for (let row=0; row<KB_ROWS.length; row++){
         const rowStr = KB_ROWS[row], w = KB.keyW[row];
@@ -296,39 +311,66 @@
         ctx.beginPath(); ctx.arc(0,0,r*0.8,0,Math.PI*2); ctx.fill();
         ctx.fillStyle = '#f5f5f5';
         ctx.font = `${Math.floor(r*0.95)}px ui-sans-serif, system-ui, -apple-system, Segoe UI, Noto Sans KR, Roboto`;
-        ctx.fillText((b.__label||'').toUpperCase(), 0, 0);
+        ctx.fillText(String(b.__label), 0, 0);
         ctx.restore();
       });
       ctx.restore();
     });
 
-    // ======== 충돌: ⌫ ↔ 글자 ⇒ 둘 다 제거 ========
+    // ======== Shift 변환 로직 ========
+    const digitShiftMap = { '1':'!', '2':'@', '3':'#', '4':'$', '5':'%', '6':'^', '7':'&', '8':'*', '9':'(', '0':')' };
+    function applyShiftToLabel(lbl){
+      if (lbl === '␣') return '␣';                 // 스페이스는 그대로
+      if (/^[a-z]$/.test(lbl)) return lbl.toUpperCase();
+      if (/^[A-Z]$/.test(lbl)) return lbl.toLowerCase();
+      if (digitShiftMap[lbl]) return digitShiftMap[lbl];
+      return lbl;                                  // 그 외(기호 등)는 그대로
+    }
+
+    // ======== 충돌 규칙 ========
     Events.on(engine, 'collisionStart', (evt) => {
       evt.pairs.forEach(({ bodyA:a, bodyB:b }) => {
+        // Backspace vs 글자류
         if (a.__isBackspace && b.__isToken && !a.__spent){
-          a.__spent = true; removeToken(b); Composite.remove(engine.world, a);
-        } else if (b.__isBackspace && a.__isToken && !b.__spent){
-          b.__spent = true; removeToken(a); Composite.remove(engine.world, b);
+          a.__spent = true; removeToken(b); Composite.remove(engine.world, a); return;
+        }
+        if (b.__isBackspace && a.__isToken && !b.__spent){
+          b.__spent = true; removeToken(a); Composite.remove(engine.world, b); return;
+        }
+
+        // Shift vs 글자/숫자/스페이스(⇧는 대상의 라벨만 바꾸고 즉시 소멸)
+        if (a.__isShift && b.__isToken){
+          b.__label = applyShiftToLabel(b.__label);
+          Composite.remove(engine.world, a);
+          const ia = tokens.indexOf(a); if (ia>=0) tokens.splice(ia,1);
+          return;
+        }
+        if (b.__isShift && a.__isToken){
+          a.__label = applyShiftToLabel(a.__label);
+          Composite.remove(engine.world, b);
+          const ib = tokens.indexOf(b); if (ib>=0) tokens.splice(ib,1);
+          return;
         }
       });
     });
 
-    // ======== 문장 만들기 (바닥 접촉 + 맞닿은 연속 체인) ========
+    // ======== 문장 만들기: 채널의 1열 체인(글자 공만) ========
     const stackTextEl = document.getElementById('stackText');
+
     function tokenLabelToChar(lbl){
-      if (!lbl) return '';
       if (lbl === '␣') return ' ';
-      return lbl.length === 1 ? lbl.toUpperCase() : lbl;
+      return String(lbl);
     }
 
     function updateSentence(){
       const { xL, xR, yTop, yBot } = channelMetrics;
       const padX = 2, padY = 2;
 
-      const inside = tokens.filter(b => {
-        const x = b.position.x, y = b.position.y;
-        return (x >= xL - padX && x <= xR + padX && y >= yTop - padY && y <= yBot + padY);
-      });
+      // 채널 내부의 "글자 공"만 대상으로(⇧, ⌫ 등은 제외)
+      const inside = tokens.filter(b => b.__isToken && (
+        b.position.x >= xL - padX && b.position.x <= xR + padX &&
+        b.position.y >= yTop - padY && b.position.y <= yBot + padY
+      ));
       if (inside.length === 0){ stackTextEl.textContent = ''; return; }
 
       // 아래→위
@@ -349,17 +391,15 @@
         if (touching){ chain.push(cur); prev = cur; } else { break; }
       }
 
-      // 바닥 상단 y
+      // 바닥 접촉 확인(맨 아래가 바닥에 닿아야 문장 표시)
       const bottomTopY = walls.bottom.bounds.min.y;
       const first = chain[0];
       const touchingFloor = (first.position.y + BASE_R) >= (bottomTopY - 0.6);
+      if (!touchingFloor){ stackTextEl.textContent = ''; return; }
 
-      stackTextEl.textContent = touchingFloor
-        ? chain.map(b => tokenLabelToChar(b.__label)).join('')
-        : '';
+      stackTextEl.textContent = chain.map(b => tokenLabelToChar(b.__label)).join('');
     }
 
-    // ======== 틱: 속도 상한 + 문장 갱신 ========
     const MAX_VX = 16 * SCALE, MAX_VY = 22 * SCALE;
     Events.on(engine, 'beforeUpdate', () => {
       Composite.allBodies(engine.world).forEach(b => {
@@ -372,25 +412,43 @@
     });
     Events.on(engine, 'afterUpdate', updateSentence);
 
-    // ======== 입력 ========
+    // ======== INPUT ========
     let lastTime = performance.now();
     document.addEventListener('keydown', (e) => {
+      // Shift → ⇧ 공 스폰 (좌/우 구분)
+      if (e.key === 'Shift' || e.code === 'ShiftLeft'){ spawnShiftBall('left'); return; }
+      if (e.code === 'ShiftRight'){ spawnShiftBall('right'); return; }
+
+      // 제어키
       if (e.key === 'Backspace' || e.code === 'Backspace'){ e.preventDefault(); spawnBackspaceBall(); return; }
       if (e.key === 'Enter' || e.code === 'Enter'){ resetAll(); return; }
       if (e.key === ' ' || e.code === 'Space'){ const p=keyToPosition(' '); spawnToken(' ',{x:p.x,y:p.y}); return; }
 
-      let letter=null;
-      if (/^[a-zA-Z]$/.test(e.key)) letter=e.key.toLowerCase();
-      else if (/^Key[A-Z]$/.test(e.code)) letter=e.code.slice(3).toLowerCase();
-      if (!letter) return;
+      // 알파벳/숫자
+      let ch = null;
+      if (/^[a-zA-Z]$/.test(e.key)) {
+        ch = e.key.toLowerCase();                    // 기본은 소문자로 스폰
+      } else if (/^Key[A-Z]$/.test(e.code)) {
+        ch = e.code.slice(3).toLowerCase();
+      } else if (/^[0-9]$/.test(e.key)) {
+        ch = e.key;
+      } else if (/^Digit[0-9]$/.test(e.code)) {
+        ch = e.code.slice(5, 6);
+      } else if (/^Numpad[0-9]$/.test(e.code)) {
+        ch = e.code.slice(6, 7);
+      }
+      if (!ch) return;
 
-      const now=performance.now(); const dt=now-lastTime; lastTime=now;
-      const p=keyToPosition(letter);
-      const spread=Math.max(-28*SCALE, Math.min(28*SCALE, (dt-120)*0.45));
-      spawnToken(letter, { x:p.x+spread, y:p.y });
+      const now = performance.now();
+      const dt = now - lastTime;
+      lastTime = now;
+
+      const p = keyToPosition(ch);
+      const spread = Math.max(-28*SCALE, Math.min(28*SCALE, (dt-120)*0.45));
+      spawnToken(ch, { x: p.x + spread, y: p.y });
     });
 
-    // ======== 리사이즈 ========
+    // ======== RESIZE/RESET ========
     function rebuildAll(){
       SCALE = calcScale();
 
@@ -405,11 +463,9 @@
         walls.railL, walls.railR, walls.bottom
       ].filter(Boolean));
 
-      // 키보드
       KB.y = Math.round(64 * SCALE);
       computeKBGeom();
 
-      // 깔대기/통로 재생성
       makeFunnel();
       updateSentence();
     }
